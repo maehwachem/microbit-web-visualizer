@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microbit Data Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        #container { width: 80%; margin: 0 auto; }
+        canvas { margin-bottom: 20px; }
+        button { margin: 10px; padding: 10px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Microbit Data Visualizer</h1>
+        <button id="connectBtn">Connect to Microbit</button>
+        <button id="downloadBtn" disabled>Download Data</button>
+        <canvas id="tempChart"></canvas>
+        <canvas id="humidityChart"></canvas>
+    </div>
+
+    <script>
+        const TEMPERATURE_UUID = "E95D9250-251D-470A-A062-FA1922DFA9A8";
+        const HUMIDITY_UUID = "73cd7350-d44e-4f94-8472-f7f0f9a5d122";
+        let device, tempCharacteristic, humidityCharacteristic;
+        let temperatureData = [], humidityData = [], timestamps = [];
+
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const humidityCtx = document.getElementById('humidityChart').getContext('2d');
+
+        const tempChart = new Chart(tempCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Temperature (°C)',
+                    data: [],
+                    borderColor: 'red',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        const humidityChart = new Chart(humidityCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Humidity (%)',
+                    data: [],
+                    borderColor: 'blue',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        document.getElementById('connectBtn').addEventListener('click', connectToDevice);
+        document.getElementById('downloadBtn').addEventListener('click', downloadData);
+
+        async function connectToDevice() {
+            try {
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'BBC micro:bit' }],
+                    optionalServices: [TEMPERATURE_UUID, HUMIDITY_UUID]
+                });
+
+                const server = await device.gatt.connect();
+                const tempService = await server.getPrimaryService(TEMPERATURE_UUID);
+                tempCharacteristic = await tempService.getCharacteristic('E95D9250-251D-470A-A062-FA1922DFA9A8');
+                const humidityService = await server.getPrimaryService(HUMIDITY_UUID);
+                humidityCharacteristic = await humidityService.getCharacteristic('73cd7350-d44e-4f94-8472-f7f0f9a5d122');
+
+                tempCharacteristic.addEventListener('characteristicvaluechanged', handleTempChange);
+                humidityCharacteristic.addEventListener('characteristicvaluechanged', handleHumidityChange);
+
+                await tempCharacteristic.startNotifications();
+                await humidityCharacteristic.startNotifications();
+
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('downloadBtn').disabled = false;
+            } catch (error) {
+                console.error('Connection failed:', error);
+            }
+        }
+
+        function handleTempChange(event) {
+            const temperature = event.target.value.getInt16(0, true) / 100;
+            updateChart(tempChart, temperature);
+            temperatureData.push(temperature);
+        }
+
+        function handleHumidityChange(event) {
+            const humidity = event.target.value.getInt16(0, true) / 100;
+            updateChart(humidityChart, humidity);
+            humidityData.push(humidity);
+        }
+
+        function updateChart(chart, value) {
+            const now = new Date();
+            timestamps.push(now.toLocaleTimeString());
+
+            chart.data.labels.push(now.toLocaleTimeString());
+            chart.data.datasets[0].data.push(value);
+
+            if (chart.data.labels.length > 20) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+
+            chart.update();
+        }
+
+        function downloadData() {
+            let csv = 'Timestamp,Temperature,Humidity\n';
+            for (let i = 0; i < timestamps.length; i++) {
+                csv += `${timestamps[i]},${temperatureData[i]},${humidityData[i]}\n`;
+            }
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "microbit_data.csv");
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+    </script>
+</body>
+</html>
